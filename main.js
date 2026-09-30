@@ -1,5 +1,8 @@
+// `slots` are spots already booked outside the website (e.g. over WhatsApp) / total spots.
+// People who join through the website are added on top, live, from Firebase (realtime.js).
 const sessions = [
   {
+    id: "2026-09-30-cbs-badminton",
     sport: "Badminton",
     title: "CBS Social Session",
     start: "2026-09-30T20:00:00+08:00",
@@ -8,9 +11,9 @@ const sessions = [
     waze: "https://waze.com/ul/hw2864uw4w",
     price: "RM15/Player",
     slots: { male: "2/16", female: "0/8" },
-    full: false,
   },
   {
+    id: "2026-10-02-netball-social",
     sport: "Netball",
     title: "Social Session",
     start: "2026-10-02T21:00:00+08:00",
@@ -19,9 +22,9 @@ const sessions = [
     waze: "https://waze.com/ul/hw286436mw",
     price: "RM10/Player",
     slots: { female: "28/28" },
-    full: true,
   },
   {
+    id: "2026-10-03-cbs-badminton",
     sport: "Badminton",
     title: "CBS Social Session",
     start: "2026-10-03T20:00:00+08:00",
@@ -30,7 +33,6 @@ const sessions = [
     waze: "https://waze.com/ul/hw2864uw4w",
     price: "RM15/Player",
     slots: { male: "3/16", female: "0/8" },
-    full: false,
   },
 ];
 
@@ -105,13 +107,13 @@ let shownKey = null;
 function renderSessions() {
   const upcoming = sessions.filter((s) => isUpcoming(s));
   // Skip re-rendering (and resetting the scroll position) when nothing changed.
-  const key = upcoming.map(sessionKey).join("|") + JSON.stringify(loadBookings());
+  const key = JSON.stringify(upcoming.map((s) => [s.id, rosters[s.id]])) + myUid();
   if (key === shownKey) return;
   shownKey = key;
 
   sessionsCount.textContent = `(${upcoming.length})`;
   sessionsList.innerHTML = upcoming.length
-    ? upcoming.map((s) => renderCard(withBooking(s), sessions.indexOf(s))).join("")
+    ? upcoming.map((s) => renderCard(withRoster(s), sessions.indexOf(s))).join("")
     : `<p class="sessions__empty">No upcoming sessions. Check back soon!</p>`;
   updateIndicator();
 }
@@ -134,49 +136,81 @@ function updateIndicator() {
 sessionsList.addEventListener("scroll", updateIndicator, { passive: true });
 window.addEventListener("resize", updateIndicator);
 
-// ---- Joining with the saved setup profile ----
-// Bookings are kept on this device only until a booking backend exists,
-// so other visitors don't see them yet.
-const BOOKINGS_KEY = "cronyism.bookings";
-const sessionKey = (s) => `${s.start}|${s.title}`;
-
-function loadBookings() {
-  try {
-    return JSON.parse(localStorage.getItem(BOOKINGS_KEY)) || {};
-  } catch {
-    return {};
-  }
-}
-
-function saveBookings(bookings) {
-  try {
-    localStorage.setItem(BOOKINGS_KEY, JSON.stringify(bookings));
-  } catch {
-    // Storage blocked (e.g. private browsing): the join lasts until the page reloads.
-  }
-}
+// ---- Live rosters (shared across phones via realtime.js / Firebase) ----
+const rosters = {}; // session id -> { limits, male: [entry], female: [entry], waitlist: [entry] }
+const db = () => window.CronyismDB;
+const myUid = () => db()?.uid() ?? null;
 
 // The visitor's saved setup (name, phone, gender), from onboarding.js.
 const myProfile = () => (typeof loadProfile === "function" ? loadProfile() : null);
 
-// The session as this visitor sees it, with their own join / waitlist added in.
-function withBooking(s) {
-  const status = loadBookings()[sessionKey(s)] || null;
-  const me = myProfile();
-  if (!status || !me) return { ...s, status: null };
-  if (status === "waitlist") return { ...s, status, waitlist: (s.waitlist || 0) + 1 };
-  if (!s.slots[me.gender]) return { ...s, status: null };
-  const [joined, capacity] = parseSlots(s.slots[me.gender]);
-  const others = s.players?.[me.gender] || Array(joined).fill("Name");
-  return {
-    ...s,
-    status,
-    slots: { ...s.slots, [me.gender]: `${joined + 1}/${capacity}` },
-    // Cut names saved before the 8-character limit existed.
-    players: { ...s.players, [me.gender]: [...others, me.name.slice(0, NAME_MAX_LENGTH)] },
-    me: { gender: me.gender, index: joined },
-  };
+const escapeHtml = (text) =>
+  String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+// Spots the website may fill for each gender: total minus those booked outside the website.
+function onlineLimits(s) {
+  const limits = { male: 0, female: 0 };
+  for (const g of slotKinds(s)) {
+    const [booked, capacity] = parseSlots(s.slots[g]);
+    limits[g] = Math.max(0, capacity - booked);
+  }
+  return limits;
 }
+
+// The session as this visitor sees it: outside bookings plus everyone who joined online.
+function withRoster(s) {
+  const roster = rosters[s.id] || { male: [], female: [], waitlist: [] };
+  const uid = myUid();
+  const view = { ...s, slots: {}, players: {}, me: null };
+  for (const g of slotKinds(s)) {
+    const [booked, capacity] = parseSlots(s.slots[g]);
+    const online = roster[g] || [];
+    view.slots[g] = `${booked + online.length}/${capacity}`;
+    view.players[g] = [...Array(booked).fill("Name"), ...online.map((p) => p.name)];
+    const mine = online.findIndex((p) => p.uid === uid);
+    if (mine >= 0) view.me = { gender: g, index: booked + mine };
+  }
+  view.waitlist = (s.waitlist || 0) + roster.waitlist.length;
+  view.status = uid ? db().statusOf(roster, uid) : null;
+  view.full = slotKinds(s).every((g) => isFullFor(view, g));
+  return view;
+}
+
+// Start listening to each upcoming session once Firebase is ready.
+const watched = new Set();
+function watchRosters() {
+  if (!db()) return;
+  for (const s of sessions.filter((x) => isUpcoming(x))) {
+    if (watched.has(s.id)) continue;
+    watched.add(s.id);
+    db().watchSession(s.id, (roster) => {
+      rosters[s.id] = roster;
+      claimSpotIfNext(s.id, roster);
+      renderSessions();
+      if (!sheet.hidden && sheetSession?.id === s.id) fillSheet(sheetSession);
+    });
+  }
+}
+
+// "If someone who is already in leaves, the next person in the waitlist joins automatically":
+// when this visitor is next in line and a spot is free, move them in.
+const claiming = new Set();
+function claimSpotIfNext(id, roster) {
+  const uid = myUid();
+  const mine = uid && roster.waitlist.find((p) => p.uid === uid);
+  if (!mine || claiming.has(id)) return;
+  const next = roster.waitlist.find((p) => p.gender === mine.gender);
+  if (next.uid !== uid || (roster[mine.gender] || []).length >= (roster.limits?.[mine.gender] || 0)) return;
+  claiming.add(id);
+  db().claimFreedSpot(id).catch((err) => console.error(err)).finally(() => claiming.delete(id));
+}
+
+window.addEventListener("cronyism:db-ready", watchRosters);
+window.addEventListener("cronyism:signed-in", () => {
+  shownKey = null;
+  renderSessions();
+  if (!sheet.hidden) fillSheet(sheetSession);
+});
 
 const isFullFor = (s, gender) => {
   const [joined, capacity] = parseSlots(s.slots[gender]);
@@ -186,6 +220,7 @@ const isFullFor = (s, gender) => {
 // Sheet button: [label, action]. Actions: "joined", "waitlist", "leave", "none".
 function ctaState(s) {
   const me = myProfile();
+  if (!db() || !myUid()) return ["Connecting…", "none"];
   if (s.status === "joined") return ["Leave Session", "leave"];
   if (s.status === "waitlist") return ["Leave Waitlist", "leave"];
   if (me && !s.slots[me.gender]) return [`${GENDERS[slotKinds(s)[0]].tag} Only session`, "none"];
@@ -222,15 +257,14 @@ function genderTags(s) {
 }
 
 // A row of player circles: filled for joined players, dashed for open spots.
-// TODO: replace the placeholder names with real player names once bookings come from a backend
-// (e.g. `players: { male: ["Aiman", ...] }` on a session).
+// Spots booked outside the website show as "Name"; online joiners show their own name.
 function playerRow(s, gender) {
   const [joined, capacity] = parseSlots(s.slots[gender]);
   const names = s.players?.[gender] || [];
   const circles = Array.from({ length: capacity }, (_, i) => {
     const taken = i < joined;
     // Open spots have no name; the empty label keeps the rows lined up.
-    const name = taken ? names[i] || "Name" : "";
+    const name = taken ? escapeHtml(names[i] || "Name") : "";
     const isMe = s.me?.gender === gender && s.me.index === i;
     return `<li class="player${isMe ? " player--me" : ""}"><span class="player__avatar player__avatar--${gender}${taken ? "" : " player__avatar--open"}"></span><span class="player__name">${name}</span></li>`;
   });
@@ -252,7 +286,7 @@ const detail = (name, text) =>
   `<li class="sheet__detail"><img src="assets/icons/${name}.svg" width="24" height="24" alt="" /><span>${text}</span></li>`;
 
 function fillSheet(session) {
-  const s = withBooking(session);
+  const s = withRoster(session);
   document.getElementById("sheet-tags").innerHTML =
     `<span class="card__tag">${s.sport}</span>` +
     genderTags(s).map(([g, label]) => `<span class="card__tag sheet__tag--${g}">${label}</span>`).join("");
@@ -349,23 +383,35 @@ const sessionSummary = (s) => `${s.sport} ${s.title}, ${formatDate(s.start)} ${f
 document.getElementById("sheet-invite").addEventListener("click", () =>
   shareSession(`Join me at ${sessionSummary(sheetSession)}!`)
 );
-document.getElementById("sheet-cta").addEventListener("click", (e) => {
-  const action = e.currentTarget.dataset.action;
+document.getElementById("sheet-cta").addEventListener("click", async (e) => {
+  const cta = e.currentTarget;
+  const action = cta.dataset.action;
   if (action === "none") return;
   // Not set up yet: ask for name / number / gender first.
-  if (!myProfile()) {
+  const me = myProfile();
+  if (!me) {
     closeSheet(true);
     openOnboarding();
     return;
   }
-  const bookings = loadBookings();
-  const key = sessionKey(sheetSession);
-  if (action === "leave") delete bookings[key];
-  else bookings[key] = action;
-  saveBookings(bookings);
-  // TODO: send the join / waitlist / leave request once the booking backend exists.
-  fillSheet(sheetSession);
-  renderSessions();
+
+  const session = sheetSession;
+  cta.disabled = true;
+  cta.textContent = action === "leave" ? "Leaving…" : "Joining…";
+  try {
+    if (action === "leave") {
+      await db().leaveSession(session.id);
+    } else {
+      // Names saved before the 8-character limit existed are cut to fit.
+      await db().joinSession(session.id, { gender: me.gender, name: me.name.slice(0, NAME_MAX_LENGTH), limits: onlineLimits(session) });
+      db().saveProfile(me).catch((err) => console.error("Saving profile failed", err));
+    }
+  } catch (err) {
+    console.error(err);
+    alert("Couldn't update your spot. Please check your internet connection and try again.");
+  }
+  // The live roster update re-renders the sheet; this covers the no-change case.
+  if (sheetSession === session) fillSheet(session);
 });
 
 document.getElementById("outstanding-form").addEventListener("submit", (e) => {
@@ -375,10 +421,19 @@ document.getElementById("outstanding-form").addEventListener("submit", (e) => {
   console.log("Check outstanding for", phone);
 });
 
+// Joins used to be saved only on this phone; they now live in Firebase.
+try {
+  localStorage.removeItem("cronyism.bookings");
+} catch {}
+
 renderSessions();
+watchRosters();
 
 // Keep the list current while the page stays open, and when returning to the tab.
-setInterval(renderSessions, 30 * 1000);
+setInterval(() => {
+  renderSessions();
+  watchRosters();
+}, 30 * 1000);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) renderSessions();
 });

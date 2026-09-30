@@ -1,6 +1,5 @@
 // First-visit setup card: details -> badminton level -> netball level.
 // Answers are kept on this device so the card only shows once.
-// TODO: send the profile to the booking backend once it exists.
 const PROFILE_KEY = "cronyism.profile";
 const LEVELS = ["Beginner", "Social Player", "Intermediate", "Advanced"];
 // Names are shown under a 48px player circle, which fits about 8 characters.
@@ -135,6 +134,8 @@ steps.slice(1).forEach((step, i) =>
     choose(button, () => {
       if (i + 2 < steps.length) return showStep(i + 2);
       saveProfile({ ...profile, savedAt: new Date().toISOString() });
+      // Also keep a private copy online so the organiser can reach players (see realtime.js).
+      window.CronyismDB?.saveProfile(profile).catch((err) => console.error("Saving profile online failed", err));
       prefillOutstanding(profile.phone);
       closeOnboarding();
     });

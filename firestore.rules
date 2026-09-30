@@ -1,0 +1,80 @@
+rules_version = '2';
+
+// Security rules for the Cronyism website (Firebase project: cronyism-bs).
+// Publish these in Firebase console -> Firestore Database -> Rules.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // A roster entry that belongs to the signed-in visitor.
+    function isMyEntry(e) {
+      return e.keys().hasOnly(['uid', 'name', 'at', 'gender'])
+        && e.uid == request.auth.uid
+        && e.name is string && e.name.size() > 0 && e.name.size() <= 8
+        && e.at is int
+        && e.get('gender', 'male') in ['male', 'female'];
+    }
+
+    // A list may stay the same, gain one entry (mine) at the end, or lose one entry (mine).
+    // So nobody can add, remove or rename anyone else.
+    function listChangeOk(before, after) {
+      return after == before
+        || (after.size() == before.size() + 1
+            && after == before.concat([after[after.size() - 1]])
+            && isMyEntry(after[after.size() - 1]))
+        || (after.size() == before.size() - 1
+            && before.removeAll(after).size() == 1
+            && before.removeAll(after)[0].uid == request.auth.uid);
+    }
+
+    // Shape of a session document, and the spot limits for joining online.
+    function rosterValid(d) {
+      return d.keys().hasOnly(['limits', 'male', 'female', 'waitlist'])
+        && d.limits.keys().hasOnly(['male', 'female'])
+        && d.limits.male is int && d.limits.male >= 0 && d.limits.male <= 100
+        && d.limits.female is int && d.limits.female >= 0 && d.limits.female <= 100
+        && d.male is list && d.male.size() <= d.limits.male
+        && d.female is list && d.female.size() <= d.limits.female
+        && d.waitlist is list && d.waitlist.size() <= 100;
+    }
+
+    // Session rosters: everyone can see who joined; you can only add or remove yourself.
+    match /sessions/{sessionId} {
+      allow read: if true;
+
+      allow create: if signedIn()
+        && rosterValid(request.resource.data)
+        && listChangeOk([], request.resource.data.male)
+        && listChangeOk([], request.resource.data.female)
+        && listChangeOk([], request.resource.data.waitlist);
+
+      allow update: if signedIn()
+        && rosterValid(request.resource.data)
+        && request.resource.data.limits == resource.data.limits
+        && listChangeOk(resource.data.male, request.resource.data.male)
+        && listChangeOk(resource.data.female, request.resource.data.female)
+        && listChangeOk(resource.data.waitlist, request.resource.data.waitlist);
+
+      allow delete: if false;
+    }
+
+    // Private setup details (incl. WhatsApp number): only the visitor can read or write
+    // their own; the organiser sees them in the Firebase console.
+    match /profiles/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name', 'phone', 'gender', 'badmintonLevel', 'netballLevel', 'updatedAt'])
+        && request.resource.data.name is string && request.resource.data.name.size() <= 8
+        && request.resource.data.phone is string && request.resource.data.phone.size() <= 20
+        && request.resource.data.gender in ['male', 'female'];
+    }
+
+    // Everything else is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
