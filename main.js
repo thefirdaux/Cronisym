@@ -206,6 +206,19 @@ function claimSpotIfNext(id, roster) {
 }
 
 window.addEventListener("cronyism:db-ready", watchRosters);
+
+// Firebase is loaded from here (not a <script> tag in index.html) so a phone holding an
+// older cached index.html still connects. Bump ASSET_VERSION with the ?v= in the HTML files.
+const ASSET_VERSION = "3";
+let dbError = null;
+import(`./realtime.js?v=${ASSET_VERSION}`).catch((err) => {
+  console.error("Loading Firebase failed", err);
+  window.dispatchEvent(new CustomEvent("cronyism:db-error", { detail: err }));
+});
+window.addEventListener("cronyism:db-error", (e) => {
+  dbError = e.detail || true;
+  if (!sheet.hidden) fillSheet(sheetSession);
+});
 window.addEventListener("cronyism:signed-in", () => {
   shownKey = null;
   renderSessions();
@@ -220,6 +233,7 @@ const isFullFor = (s, gender) => {
 // Sheet button: [label, action]. Actions: "joined", "waitlist", "leave", "none".
 function ctaState(s) {
   const me = myProfile();
+  if (dbError) return ["Couldn't connect. Tap to retry", "retry"];
   if (!db() || !myUid()) return ["Connecting…", "none"];
   if (s.status === "joined") return ["Leave Session", "leave"];
   if (s.status === "waitlist") return ["Leave Waitlist", "leave"];
@@ -387,6 +401,10 @@ document.getElementById("sheet-cta").addEventListener("click", async (e) => {
   const cta = e.currentTarget;
   const action = cta.dataset.action;
   if (action === "none") return;
+  if (action === "retry") {
+    location.reload();
+    return;
+  }
   // Not set up yet: ask for name / number / gender first.
   const me = myProfile();
   if (!me) {

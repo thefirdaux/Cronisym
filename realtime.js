@@ -34,7 +34,10 @@ const uidReady = new Promise((resolve) => {
       resolve(user.uid);
       window.dispatchEvent(new Event("cronyism:signed-in"));
     } else {
-      signInAnonymously(auth).catch((err) => console.error("Anonymous sign-in failed", err));
+      signInAnonymously(auth).catch((err) => {
+        console.error("Anonymous sign-in failed", err);
+        window.dispatchEvent(new CustomEvent("cronyism:db-error", { detail: err }));
+      });
     }
   });
 });
