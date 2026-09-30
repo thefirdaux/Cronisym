@@ -1,0 +1,8 @@
+# macOS
+.DS_Store
+
+# Local Claude Code preview config (contains machine-specific paths)
+.claude/
+
+# Original photo; the site uses assets/hero.jpg
+IMG_2197.jpg_20261001011629.jpg

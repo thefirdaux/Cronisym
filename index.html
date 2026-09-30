@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Cronyism Sports Syndicate</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div class="brand">
+        <p class="brand__name">CRONYISM</p>
+        <p class="brand__tagline">SPORTS SYNDICATE</p>
+      </div>
+      <button class="icon-btn" id="menu-open" type="button" aria-label="Open menu" aria-controls="menu-drawer" aria-expanded="false">
+        <img src="assets/icons/menu.svg" width="24" height="24" alt="" />
+      </button>
+    </header>
+
+    <main>
+      <section class="hero" aria-label="Join a session">
+        <img class="hero__image" src="assets/hero.jpg" width="165" height="294" alt="Player in a Cronies jersey holding a badminton racket" />
+        <h1 class="hero__title">Play More.Join Here</h1>
+      </section>
+
+      <section class="sessions" aria-labelledby="sessions-title">
+        <div class="sessions__head">
+          <h2 id="sessions-title" class="sessions__title">
+            Our Sessions <span class="sessions__count" id="sessions-count"></span>
+          </h2>
+          <a class="pill-link" href="#">See All</a>
+        </div>
+        <div class="sessions__list" id="sessions-list"></div>
+        <div class="scroll-indicator" id="sessions-indicator" aria-hidden="true">
+          <span class="scroll-indicator__thumb"></span>
+        </div>
+      </section>
+    </main>
+
+    <footer class="outstanding" id="outstanding">
+      <div class="outstanding__text">
+        <h2 class="outstanding__title">Check your outstanding</h2>
+        <p class="outstanding__desc">Enter the same WhatsApp number used for your session booking</p>
+      </div>
+      <form class="outstanding__form" id="outstanding-form">
+        <label class="visually-hidden" for="phone">WhatsApp number</label>
+        <input class="outstanding__input" id="phone" name="phone" type="tel" inputmode="numeric" placeholder="0123456789" autocomplete="tel" required />
+        <button class="outstanding__submit" type="submit" aria-label="Search">
+          <img src="assets/icons/search-button.svg" width="52" height="52" alt="" />
+        </button>
+      </form>
+    </footer>
+  </div>
+
+
+  <div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
+  <section class="sheet" id="session-sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1" hidden>
+    <div class="sheet__head">
+      <div class="sheet__info">
+        <div class="sheet__tags" id="sheet-tags"></div>
+        <h2 class="sheet__title" id="sheet-title"></h2>
+        <ul class="sheet__details" id="sheet-details"></ul>
+      </div>
+      <div class="sheet__actions">
+        <button class="icon-btn" id="sheet-invite" type="button" aria-label="Invite a friend">
+          <img src="assets/icons/invite.svg" width="32" height="32" alt="" />
+        </button>
+        <a class="icon-btn" id="sheet-directions" href="#" target="_blank" rel="noopener" aria-label="Directions in Waze">
+          <img src="assets/icons/share.svg" width="32" height="32" alt="" />
+        </a>
+      </div>
+    </div>
+
+    <div class="sheet__roster" id="sheet-roster"></div>
+
+    <div class="sheet__waitlist">
+      <p class="sheet__waitlist-title" id="sheet-waitlist-count"></p>
+      <p class="sheet__waitlist-note">If someone who is already in leaves, then the next person in the waitlist joins automatically</p>
+    </div>
+
+    <button class="sheet__cta" id="sheet-cta" type="button"></button>
+  </section>
+
+  <div class="onboard-backdrop" id="onboard-backdrop" hidden></div>
+  <section class="onboard" id="onboard" role="dialog" aria-modal="true" aria-labelledby="onboard-title-1" hidden>
+    <form class="onboard__step" id="onboard-step-1" novalidate>
+      <div class="onboard__intro">
+        <h2 class="onboard__title" id="onboard-title-1">Set up once.<br />Join anytime</h2>
+        <p class="onboard__lead">Enter your details once, and you can join future Cronyism game sessions without having to fill them in again</p>
+      </div>
+      <div class="onboard__fields">
+        <label class="visually-hidden" for="onboard-name">Name</label>
+        <input class="onboard__input" id="onboard-name" name="name" type="text" placeholder="Name" autocomplete="name" maxlength="8" required />
+        <label class="visually-hidden" for="onboard-phone">WhatsApp Number</label>
+        <input class="onboard__input" id="onboard-phone" name="phone" type="tel" inputmode="tel" placeholder="WhatsApp Number" autocomplete="tel" required />
+        <div class="onboard__pair" role="group" aria-label="Gender">
+          <button class="onboard__option onboard__option--center" type="button" data-gender="male">Men</button>
+          <button class="onboard__option onboard__option--center" type="button" data-gender="female">Women</button>
+        </div>
+      </div>
+    </form>
+
+    <div class="onboard__step" id="onboard-step-2" data-sport="badminton" hidden>
+      <h2 class="onboard__title" id="onboard-title-2">Whats your badminton<br />level ?</h2>
+      <div class="onboard__options" role="group" aria-label="Badminton level"></div>
+    </div>
+
+    <div class="onboard__step" id="onboard-step-3" data-sport="netball" hidden>
+      <h2 class="onboard__title" id="onboard-title-3">Whats your netball<br />level ?</h2>
+      <div class="onboard__options" role="group" aria-label="Netball level"></div>
+    </div>
+  </section>
+
+  <script src="menu.js"></script>
+  <script src="onboarding.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
