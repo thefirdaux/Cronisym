@@ -5,7 +5,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.0/fireba
 import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-auth.js";
 import {
   doc,
-  getFirestore,
+  initializeFirestore,
   onSnapshot,
   runTransaction,
   serverTimestamp,
@@ -25,7 +25,9 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
+// Long polling instead of a streaming connection: iPhone Safari's streaming kept failing,
+// and Firebase only fell back to long polling after a 15-20 second timeout.
+const db = initializeFirestore(app, { experimentalForceLongPolling: true });
 
 // Each browser gets its own anonymous ID (no password), kept across visits.
 const uidReady = new Promise((resolve) => {
@@ -64,14 +66,13 @@ function watchSession(id, onChange) {
 }
 
 // Takes a spot if one is free for that gender, otherwise joins the waiting list.
-// Runs as a transaction, so two people can't both take the last spot.
+// Runs as a transaction, so two people can't both take the last spot. Returns the updated roster.
 async function joinSession(id, { gender, name, limits }) {
   const uid = await uidReady;
   return runTransaction(db, async (tx) => {
     const snap = await tx.get(sessionRef(id));
     const roster = snap.exists() ? withDefaults(snap.data()) : { ...emptyRoster(), limits };
-    const existing = statusOf(roster, uid);
-    if (existing) return existing;
+    if (statusOf(roster, uid)) return roster;
 
     const entry = { uid, name, at: Date.now() };
     const hasRoom = roster[gender].length < (roster.limits[gender] || 0);
@@ -79,16 +80,16 @@ async function joinSession(id, { gender, name, limits }) {
 
     if (snap.exists()) tx.update(sessionRef(id), change);
     else tx.set(sessionRef(id), { ...roster, ...change });
-    return hasRoom ? "joined" : "waitlist";
+    return { ...roster, ...change };
   });
 }
 
-// Removes the visitor from the session and its waiting list.
+// Removes the visitor from the session and its waiting list. Returns the updated roster.
 async function leaveSession(id) {
   const uid = await uidReady;
   return runTransaction(db, async (tx) => {
     const snap = await tx.get(sessionRef(id));
-    if (!snap.exists()) return;
+    if (!snap.exists()) return emptyRoster();
     const roster = withDefaults(snap.data());
     const change = {};
     for (const key of ["male", "female", "waitlist"]) {
@@ -96,6 +97,7 @@ async function leaveSession(id) {
       if (kept.length !== roster[key].length) change[key] = kept;
     }
     if (Object.keys(change).length) tx.update(sessionRef(id), change);
+    return { ...roster, ...change };
   });
 }
 

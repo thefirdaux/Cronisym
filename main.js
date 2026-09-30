@@ -176,6 +176,14 @@ function withRoster(s) {
   return view;
 }
 
+// Show a session's latest roster everywhere it appears.
+function applyRoster(id, roster) {
+  rosters[id] = roster;
+  claimSpotIfNext(id, roster);
+  renderSessions();
+  if (!sheet.hidden && sheetSession?.id === id) fillSheet(sheetSession);
+}
+
 // Start listening to each upcoming session once Firebase is ready.
 const watched = new Set();
 function watchRosters() {
@@ -183,12 +191,7 @@ function watchRosters() {
   for (const s of sessions.filter((x) => isUpcoming(x))) {
     if (watched.has(s.id)) continue;
     watched.add(s.id);
-    db().watchSession(s.id, (roster) => {
-      rosters[s.id] = roster;
-      claimSpotIfNext(s.id, roster);
-      renderSessions();
-      if (!sheet.hidden && sheetSession?.id === s.id) fillSheet(sheetSession);
-    });
+    db().watchSession(s.id, (roster) => applyRoster(s.id, roster));
   }
 }
 
@@ -209,7 +212,7 @@ window.addEventListener("cronyism:db-ready", watchRosters);
 
 // Firebase is loaded from here (not a <script> tag in index.html) so a phone holding an
 // older cached index.html still connects. Bump ASSET_VERSION with the ?v= in the HTML files.
-const ASSET_VERSION = "3";
+const ASSET_VERSION = "4";
 let dbError = null;
 import(`./realtime.js?v=${ASSET_VERSION}`).catch((err) => {
   console.error("Loading Firebase failed", err);
@@ -417,11 +420,13 @@ document.getElementById("sheet-cta").addEventListener("click", async (e) => {
   cta.disabled = true;
   cta.textContent = action === "leave" ? "Leaving…" : "Joining…";
   try {
+    // Show the result straight away rather than waiting for the live update to arrive.
     if (action === "leave") {
-      await db().leaveSession(session.id);
+      applyRoster(session.id, await db().leaveSession(session.id));
     } else {
       // Names saved before the 8-character limit existed are cut to fit.
-      await db().joinSession(session.id, { gender: me.gender, name: me.name.slice(0, NAME_MAX_LENGTH), limits: onlineLimits(session) });
+      const roster = await db().joinSession(session.id, { gender: me.gender, name: me.name.slice(0, NAME_MAX_LENGTH), limits: onlineLimits(session) });
+      applyRoster(session.id, roster);
       db().saveProfile(me).catch((err) => console.error("Saving profile failed", err));
     }
   } catch (err) {
